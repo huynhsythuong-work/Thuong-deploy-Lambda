@@ -1,110 +1,166 @@
-# Node.js + Express — BYOL starter (NOT YET SERVERLESS)
+# Express Lambda Demo
 
-This is a plain Express app. It runs locally as a normal Node HTTP server.
-**It does not run on Lambda yet.** Your group's job is to make it run on
-Lambda with the **minimum** code/config changes.
+Repo này đóng gói một Express app chạy được cả local và trên AWS Lambda. Phần Express nằm trong `app.js`; Lambda chỉ dùng thêm `lambda.js` để chuyển request từ API Gateway sang Express thông qua `serverless-http`.
 
+## Thành phần chính
+
+```text
+app.js          Express app và route chính
+server.js       entrypoint để chạy local bằng Node
+lambda.js       handler cho AWS Lambda
+template.yaml   SAM/CloudFormation template
+deploy.ps1      script package và deploy bằng AWS CLI
+samconfig.toml  cấu hình khi deploy bằng SAM CLI
 ```
-node-express/
-├── app.js              ← The existing Express application (Lambda-unaware — DO NOT REWRITE this for Lambda specifics)
-├── server.js           ← Local dev runner: `npm start` → http://localhost:3000
-├── package.json        ← Only `express` listed; add anything else you need
-├── template.yaml       ← SAM scaffold — has TODO markers you must fill in
-├── samconfig.toml      ← stack name + region (us-west-2) pre-set
-└── README.md           ← this file
+
+Các route đang có:
+
+- `GET /`
+- `GET /api/hello/:name`
+- `POST /api/echo`
+
+## Chuẩn bị
+
+Cần có:
+
+- Node.js 22+
+- npm
+- PowerShell
+- AWS CLI v2 đã login
+- AWS account có quyền tạo S3, CloudFormation, Lambda, API Gateway, CloudWatch Logs và IAM role
+
+Kiểm tra nhanh:
+
+```powershell
+node -v
+npm -v
+aws --version
+aws sts get-caller-identity
 ```
 
-## Step 0 — Confirm the app works in its current "non-serverless" form
+Nếu AWS CLI chưa có credentials:
 
-```bash
+```powershell
+aws configure
+```
+
+Region nên dùng cho bài này là:
+
+```text
+us-west-2
+```
+
+## Chạy local
+
+Cài dependency:
+
+```powershell
 npm install
+```
+
+Start server:
+
+```powershell
 npm start
-# → listening on http://localhost:3000
+```
 
-# in another terminal:
+Test:
+
+```powershell
 curl http://localhost:3000/
-curl http://localhost:3000/api/hello/Lan
-curl -X POST http://localhost:3000/api/echo -H 'Content-Type: application/json' -d '{"hi":"there"}'
+curl http://localhost:3000/api/hello/Thuong
+curl -Method POST http://localhost:3000/api/echo `
+  -ContentType 'application/json' `
+  -Body '{"source":"local"}'
 ```
 
-If those three curls work, you have a baseline to compare against later.
+## Deploy
 
-## Step 1 — Pick your strategy
+Cách khuyến nghị là dùng script PowerShell:
 
-You have several ways to get this on Lambda. Pick **one** (others are
-foot-notes for your reflection write-up):
-
-| # | Strategy | What you add | Code-change cost | Cold start estimate |
-|---|----------|--------------|------------------|---------------------|
-| A | `serverless-http` adapter | 1 new file (`lambda.js`), 1 npm dep | ~3 lines | 200–400 ms |
-| B | `@vendia/serverless-express` adapter | 1 new file, 1 npm dep | ~3 lines | 200–400 ms |
-| C | **AWS Lambda Web Adapter** (Lambda Layer + `run.sh`) | 1 shell script, edit `template.yaml` | 0 JS lines | +200 ms over native |
-| D | Roll your own | manual event → req → res translation | 30–80 lines | depends |
-
-Document **why** you picked your option in `NOTES.md` (you'll need this for
-the worksheet's Q4.1 + Q4.6).
-
-## Step 2 — Implement
-
-The repo intentionally leaves you these blanks:
-
-- `template.yaml` — `Handler:` is `TODO_FILL_IN`. Replace with the correct
-  value for your strategy.
-- `package.json` — add your chosen adapter to `dependencies` (or skip if
-  you use Lambda Web Adapter, which is a Layer not an npm package).
-- *New file(s)* — usually one new entrypoint file. Don't touch `app.js`.
-
-> **Hard rule:** `app.js` must NOT import anything from your adapter.
-> The whole pedagogy is that the framework code stays clean.
-
-## Step 3 — Build + deploy
-
-```bash
-sam build
-sam deploy --guided          # first time only — uses pre-set us-west-2
-# subsequent deploys:
-sam deploy
+```powershell
+.\deploy.ps1
 ```
 
-Region MUST be `us-west-2` if you're on the workshop participant account.
+Nếu không truyền `-StackName`, script tự tạo tên stack theo Windows username:
 
-## Step 4 — Smoke-test the live URL
+```text
+<username>-byol-node-express
+```
 
-```bash
-export API=$(aws cloudformation describe-stacks \
-  --stack-name byol-node-express --region us-west-2 \
-  --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text)
+Tên này giúp tránh đụng stack/Lambda của người khác trong cùng AWS account. Muốn chỉ định rõ tên stack thì chạy:
 
+```powershell
+.\deploy.ps1 -Region us-west-2 -StackName thuong-byol-node-express
+```
+
+Script sẽ:
+
+1. lấy AWS account ID hiện tại
+2. tạo S3 bucket để chứa artifact nếu chưa có
+3. package template và source code
+4. deploy CloudFormation stack
+5. in ra API Gateway URL
+
+Deploy hiện tại của repo này:
+
+```text
+Stack: thuong-byol-node-express
+Region: us-west-2
+API: https://4b1x0tqgf6.execute-api.us-west-2.amazonaws.com
+```
+
+## Test sau deploy
+
+Lấy API URL từ CloudFormation:
+
+```powershell
+$API = aws cloudformation describe-stacks `
+  --stack-name thuong-byol-node-express `
+  --region us-west-2 `
+  --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" `
+  --output text
+```
+
+Gọi thử:
+
+```powershell
 curl $API
-curl $API/api/hello/Lan
-curl -X POST $API/api/echo -H 'Content-Type: application/json' -d '{"hi":"there"}'
+curl "$API/api/hello/Thuong"
+curl -Method POST "$API/api/echo" `
+  -ContentType 'application/json' `
+  -Body '{"source":"lambda"}'
 ```
 
-All three should return the same JSON shape you saw locally in Step 0. If
-the JSON differs at all, something's wrong in your adapter wiring.
+## Tránh lỗi trùng resource
 
-## Step 5 — Measure cold start
+Trong `template.yaml` không đặt `FunctionName` cố định. CloudFormation sẽ tự sinh tên Lambda dựa trên stack, nên nhiều người có thể deploy cùng template mà không tranh nhau Lambda tên `byol-node-express`.
 
-```bash
-sam logs --stack-name byol-node-express --region us-west-2 -t
-# OR Console → CloudWatch → /aws/lambda/byol-node-express → latest stream
+Nếu dùng `sam deploy`, xem lại `samconfig.toml` trước khi chạy. File hiện đang dùng:
+
+```text
+stack_name = "thuong-byol-node-express"
+region = "us-west-2"
 ```
 
-Find the `REPORT` line. The `Init Duration` value is your cold-start cost.
-Record it in the worksheet.
+Người khác copy repo nên đổi `stack_name` sang tên riêng của họ.
 
-## Teardown
+## Xóa hạ tầng
 
-```bash
-sam delete --stack-name byol-node-express --region us-west-2
+```powershell
+aws cloudformation delete-stack `
+  --stack-name thuong-byol-node-express `
+  --region us-west-2
 ```
 
-## Common pitfalls
+Nếu lúc deploy dùng stack name khác thì thay đúng tên stack đó.
 
-| Symptom | Probably... |
-|---------|-------------|
-| `sam deploy` fails with AccessDenied | Wrong region — must be `us-west-2` on workshop role |
-| 502 Bad Gateway from API URL | Handler name in `template.yaml` doesn't match the file/export you created |
-| "Cannot find module 'serverless-http'" in logs | Forgot to `npm install` your adapter; `sam build` copies `node_modules` |
-| Lambda returns body as string `"[object Object]"` | Adapter didn't serialize JSON — make sure `app.use(express.json())` is set (it is in `app.js`, just confirming) |
-| Routes return 404 in Lambda but work locally | Path stripping — API GW gives you full path, adapter handles this; if you wrote your own, this is bug class #1 |
+## Lỗi thường gặp
+
+`AWS::EarlyValidation::ResourceExistenceCheck`: thường do đặt tên resource cố định đã tồn tại, ví dụ Lambda `FunctionName`. Template hiện đã bỏ `FunctionName` để tránh lỗi này.
+
+`Unable to locate credentials`: AWS CLI chưa login hoặc profile không đúng. Chạy `aws configure` hoặc kiểm tra lại `AWS_PROFILE`.
+
+`AccessDenied`: IAM user/role thiếu quyền tạo hoặc cập nhật S3, CloudFormation, Lambda, API Gateway, CloudWatch Logs hoặc IAM.
+
+`502 Bad Gateway`: kiểm tra `lambda.js`, dependency `serverless-http`, và `Handler: lambda.handler` trong `template.yaml`.

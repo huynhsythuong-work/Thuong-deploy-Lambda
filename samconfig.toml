@@ -1,7 +1,7 @@
 version = 0.1
 
 [default.deploy.parameters]
-stack_name = "byol-node-express"
+stack_name = "thuong-byol-node-express"
 region = "us-west-2"
 confirm_changeset = false
 capabilities = "CAPABILITY_IAM"
